@@ -1,5 +1,26 @@
 import sqlite3
 
+from datetime import datetime
+
+# Ejemplo para el balance diario usando la fecha actual de Python
+def get_daily_summary():
+    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+    conexion = sqlite3.connect("finanzas_didi.db")
+    cursor = conexion.cursor()
+    
+    cursor.execute("SELECT SUM(monto) FROM transacciones WHERE tipo = 'ingreso' AND DATE(fecha) = ?", (fecha_hoy,))
+    total_ingresos = cursor.fetchone()[0] or 0.0
+    
+    cursor.execute("SELECT SUM(monto) FROM transacciones WHERE tipo = 'gasto' AND DATE(fecha) = ?", (fecha_hoy,))
+    total_gastos = cursor.fetchone()[0] or 0.0
+    
+    cursor.execute("SELECT categoria, SUM(monto) FROM transacciones WHERE DATE(fecha) = ? GROUP BY categoria", (fecha_hoy,))
+    detalles = cursor.fetchall()
+    conexion.close()
+    
+    balance_neto = total_ingresos - total_gastos
+    return total_ingresos, total_gastos, balance_neto, detalles
+
 def init_db():
     conexion = sqlite3.connect("finanzas_didi.db")
     cursor = conexion.cursor()
@@ -25,22 +46,6 @@ def registrar_transaccion(tipo, categoria, monto):
     conexion.commit()
     conexion.close()
 
-# Balance Diario (Ya lo tienes)
-def get_daily_summary():
-    conexion = sqlite3.connect("finanzas_didi.db")
-    cursor = conexion.cursor()
-    cursor.execute("SELECT SUM(monto) FROM transacciones WHERE tipo = 'ingreso' AND DATE(fecha) = DATE('now', 'localtime')")
-    total_ingresos = cursor.fetchone()[0] or 0.0
-    
-    cursor.execute("SELECT SUM(monto) FROM transacciones WHERE tipo = 'gasto' AND DATE(fecha) = DATE('now', 'localtime')")
-    total_gastos = cursor.fetchone()[0] or 0.0
-    
-    cursor.execute("SELECT categoria, SUM(monto) FROM transacciones WHERE DATE(fecha) = DATE('now', 'localtime') GROUP BY categoria")
-    detalles = cursor.fetchall()
-    conexion.close()
-    
-    balance_neto = total_ingresos - total_gastos
-    return total_ingresos, total_gastos, balance_neto, detalles
 
 # --- NUEVO: Balance Semanal (filtra desde el lunes de la semana actual) ---
 def get_weekly_summary():

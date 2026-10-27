@@ -23,7 +23,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
 TOKEN = "8984256294:AAF8RNWQtMI-PSCx8KMYyR5l-AwerRv8UOc"
 GLOBAL_CHAT_ID = None
@@ -340,7 +340,7 @@ def tarea_reporte_nocturno(application):
             lambda ctx: ctx.bot.send_message(chat_id=GLOBAL_CHAT_ID, text=texto, parse_mode="Markdown"),
             when=0
         )
-        
+
 # Mini servidor web para evitar el Timeout en Render
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
