@@ -1,6 +1,9 @@
 import logging
 from datetime import time
 import re
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from PIL import Image
 import pytesseract
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -337,6 +340,21 @@ def tarea_reporte_nocturno(application):
             lambda ctx: ctx.bot.send_message(chat_id=GLOBAL_CHAT_ID, text=texto, parse_mode="Markdown"),
             when=0
         )
+        
+# Mini servidor web para evitar el Timeout en Render
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot DiDi Finanzas is running!")
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
+    server.serve_forever()
+
+# Iniciar el servidor web en un hilo secundario antes de arrancar el bot
+threading.Thread(target=run_web_server, daemon=True).start()
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
