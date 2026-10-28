@@ -3,6 +3,8 @@ import pytesseract
 from PIL import Image
 import re
 
+pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
+
 
 def extract_didi_trip_info(image_path: str) -> dict:
     """
