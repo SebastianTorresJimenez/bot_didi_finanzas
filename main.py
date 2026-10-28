@@ -60,7 +60,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def responder_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global GLOBAL_CHAT_ID
     query = update.callback_query
-    await query.answer()
+    
+    try:
+        await query.answer()
+    except Exception as e:
+        logging.warning(f"No se pudo responder al callback (posible expiración): {e}")
+        return
+
     GLOBAL_CHAT_ID = query.message.chat_id
     data = query.data
 
