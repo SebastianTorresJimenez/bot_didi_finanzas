@@ -2,6 +2,8 @@ import logging
 from datetime import time
 import re
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from PIL import Image
 import pytesseract
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -23,7 +25,6 @@ logging.basicConfig(
 
 pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
-# Nuevo token limpio de tu bot
 TOKEN = "8827946740:AAEZnOlJziFLbDJMeBaCiARLrClWf3Cu9sI"
 GLOBAL_CHAT_ID = None
 
@@ -337,6 +338,21 @@ def tarea_reporte_nocturno(application):
             when=0
         )
 
+# Mini servidor web secundario para mantener vivo el servicio en Render
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot DiDi Finanzas is running!")
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
+    server.serve_forever()
+
+# Arrancar el servidor web auxiliar en segundo plano
+threading.Thread(target=run_web_server, daemon=True).start()
+
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -349,15 +365,7 @@ if __name__ == '__main__':
     scheduler.add_job(lambda: tarea_reporte_nocturno(app), 'cron', hour=21, minute=0)
     scheduler.start()
 
-    PORT = int(os.environ.get("PORT", 10000))
-    # REEMPLAZA ESTE ENLACE CON TU URL REAL DE RENDER (ej: https://tudominio.onrender.com)
-    URL_RENDER = "https://bot-didi-finanzas-4.onrender.com"
-
-    print("🤖 Bot activo mediante Webhook en Render...")
+    print("🤖 Bot activo mediante Polling seguro y con servidor web auxiliar...")
     
-    # Inicia el Webhook eliminando por completo el sondeo (polling) y los conflictos
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=f"{URL_RENDER}/webhook"
-    )
+    # Arranca el polling limpio descartando sesiones viejas o colgadas
+    app.run_polling(drop_pending_updates=True)
