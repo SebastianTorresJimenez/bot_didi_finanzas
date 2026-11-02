@@ -2,8 +2,6 @@ import logging
 from datetime import time
 import re
 import os
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from PIL import Image
 import pytesseract
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -25,7 +23,8 @@ logging.basicConfig(
 
 pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
-TOKEN = "8984256294:AAF8RNWQtMI-PSCx8KMYyR5l-AwerRv8UOc"
+# Nuevo token limpio de tu bot
+TOKEN = "8827946740:AAEZnOlJziFLbDJMeBaCiARLrClWf3Cu9sI"
 GLOBAL_CHAT_ID = None
 
 def obtener_menu_principal():
@@ -107,12 +106,10 @@ async def responder_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver al Menú", callback_data="menu_inicio")]])
         )
 
-    # --- NUEVO: Manejo de los botones de métodos de pago tras el OCR ---
     elif data.startswith("pago_"):
         metodo = data.replace("pago_", "").capitalize()
         monto = context.user_data.get("monto_pendiente", 0)
         
-        # Guardar en base de datos con el método de pago elegido
         registrar_transaccion("ingreso", f"Didi ({metodo})", monto)
         context.user_data.clear()
 
@@ -214,13 +211,11 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             monto = float(texto)
             context.user_data["monto_pendiente"] = monto
             
-            # Mostrar botones de pago también para ingreso manual
             keyboard_pago = [
                 [InlineKeyboardButton("💵 Efectivo", callback_data="pago_efectivo"),
                  InlineKeyboardButton("📱 Nequi", callback_data="pago_nequi")],
                 [InlineKeyboardButton("💳 Saldo Didi (Tarjeta)", callback_data="pago_tarjeta")]
             ]
-            context.user_data.clear()
             await update.message.reply_text(
                 f"✅ Monto ingresado: *${monto:,.0f} COP*\n\n¿Cómo te pagaron este servicio?",
                 parse_mode="Markdown",
@@ -246,7 +241,6 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Usa el comando /start para ver el menú principal.")
 
-# Procesamiento de imágenes con OCR y despliegue de botones de pago
 async def recibir_imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global GLOBAL_CHAT_ID
     GLOBAL_CHAT_ID = update.message.chat_id
@@ -264,13 +258,11 @@ async def recibir_imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         monto_detectado = None
         duracion_distancia = "No detectada"
 
-        # Extraer duración y distancia si aparecen en la imagen
         match_duracion = re.search(r'(\d+m\s*\d*s?)', texto_ocr)
         match_distancia = re.search(r'(\d+[\.,]?\d*\s*km)', texto_ocr, re.IGNORECASE)
         if match_duracion and match_distancia:
             duracion_distancia = f"{match_duracion.group(1)} / {match_distancia.group(1)}"
 
-        # Buscar el monto principal
         lineas = texto_ocr.split('\n')
         for i, linea in enumerate(lineas):
             if "ganancias" in linea.lower() or "total" in linea.lower() or "tarifa" in linea.lower():
@@ -294,10 +286,8 @@ async def recibir_imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
 
         if monto_detectado:
-            # Guardamos temporalmente el monto para asignarlo cuando presione el botón de pago
             context.user_data["monto_pendiente"] = monto_detectado
 
-            # Creamos los botones idénticos a tu referencia visual
             keyboard_pago = [
                 [InlineKeyboardButton("💵 Efectivo", callback_data="pago_efectivo"),
                  InlineKeyboardButton("📱 Nequi", callback_data="pago_nequi")],
@@ -347,21 +337,6 @@ def tarea_reporte_nocturno(application):
             when=0
         )
 
-# Mini servidor web para evitar el Timeout en Render
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot DiDi Finanzas is running!")
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
-    server.serve_forever()
-
-# Iniciar el servidor web en un hilo secundario antes de arrancar el bot
-threading.Thread(target=run_web_server, daemon=True).start()
-
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -374,5 +349,15 @@ if __name__ == '__main__':
     scheduler.add_job(lambda: tarea_reporte_nocturno(app), 'cron', hour=21, minute=0)
     scheduler.start()
 
-    print("🤖 Bot activo con OCR y botones de métodos de pago configurados...")
-    app.run_polling()
+    PORT = int(os.environ.get("PORT", 10000))
+    # REEMPLAZA ESTE ENLACE CON TU URL REAL DE RENDER (ej: https://tudominio.onrender.com)
+    URL_RENDER = "https://bot-didi-finanzas-4.onrender.com"
+
+    print("🤖 Bot activo mediante Webhook en Render...")
+    
+    # Inicia el Webhook eliminando por completo el sondeo (polling) y los conflictos
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"{URL_RENDER}/webhook"
+    )
