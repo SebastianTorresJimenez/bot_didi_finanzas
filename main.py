@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import time
 import re
@@ -254,7 +255,11 @@ async def recibir_imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         imagen = Image.open(image_path)
-        texto_ocr = pytesseract.image_to_string(imagen, lang='spa')
+        texto_ocr = await asyncio.to_thread(
+            pytesseract.image_to_string,
+            imagen,
+            lang='spa'
+        )
         
         monto_detectado = None
         duracion_distancia = "No detectada"
