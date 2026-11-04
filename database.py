@@ -32,90 +32,57 @@ def registrar_transaccion(tipo, categoria, monto):
     conexion.commit()
     conexion.close()
 
+def _get_summary_for_range(fecha_inicio, fecha_fin):
+    conexion = sqlite3.connect("finanzas_didi.db")
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("BEGIN")
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0)
+            FROM transacciones
+            WHERE fecha >= ? AND fecha < ?
+            """,
+            (fecha_inicio, fecha_fin)
+        )
+        total_ingresos, total_gastos = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT categoria, SUM(monto)
+            FROM transacciones
+            WHERE fecha >= ? AND fecha < ?
+            GROUP BY categoria
+            ORDER BY categoria
+            """,
+            (fecha_inicio, fecha_fin)
+        )
+        detalles = cursor.fetchall()
+    finally:
+        conexion.close()
+
+    balance_neto = total_ingresos - total_gastos
+    return total_ingresos, total_gastos, balance_neto, detalles
+
 def get_daily_summary():
     hoy = datetime.now().date()
-    fecha_hoy = hoy.strftime('%Y-%m-%d')
-    fecha_manana = (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
-    conexion = sqlite3.connect("finanzas_didi.db")
-    cursor = conexion.cursor()
-    
-    # Total Ingresos del día
-    cursor.execute("SELECT SUM(monto) FROM transacciones WHERE tipo = 'ingreso' AND fecha >= ? AND fecha < ?", (fecha_hoy, fecha_manana))
-    res_ing = cursor.fetchone()
-    total_ingresos = res_ing[0] if res_ing and res_ing[0] is not None else 0.0
-    
-    # Total Gastos del día
-    cursor.execute("SELECT SUM(monto) FROM transacciones WHERE tipo = 'gasto' AND fecha >= ? AND fecha < ?", (fecha_hoy, fecha_manana))
-    res_gas = cursor.fetchone()
-    total_gastos = res_gas[0] if res_gas and res_gas[0] is not None else 0.0
-    
-    # Detalles agrupados por categoría para hoy
-    cursor.execute("SELECT categoria, SUM(monto) FROM transacciones WHERE fecha >= ? AND fecha < ? GROUP BY categoria", (fecha_hoy, fecha_manana))
-    detalles = cursor.fetchall()
-    conexion.close()
-    
-    balance_neto = total_ingresos - total_gastos
-    return total_ingresos, total_gastos, balance_neto, detalles
+    fecha_inicio = hoy.strftime('%Y-%m-%d')
+    fecha_fin = (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
+    return _get_summary_for_range(fecha_inicio, fecha_fin)
 
 def get_weekly_summary():
-    fecha_inicio = (datetime.utcnow().date() - timedelta(days=7)).strftime('%Y-%m-%d')
-    conexion = sqlite3.connect("finanzas_didi.db")
-    cursor = conexion.cursor()
-    
-    # Usamos string de fecha para los últimos 7 días con formato seguro SUBSTR
-    cursor.execute("""
-        SELECT SUM(monto) FROM transacciones 
-        WHERE tipo = 'ingreso' AND fecha >= ?
-    """, (fecha_inicio,))
-    res_ing = cursor.fetchone()
-    total_ingresos = res_ing[0] if res_ing and res_ing[0] is not None else 0.0
-    
-    cursor.execute("""
-        SELECT SUM(monto) FROM transacciones 
-        WHERE tipo = 'gasto' AND fecha >= ?
-    """, (fecha_inicio,))
-    res_gas = cursor.fetchone()
-    total_gastos = res_gas[0] if res_gas and res_gas[0] is not None else 0.0
-    
-    cursor.execute("""
-        SELECT categoria, SUM(monto) FROM transacciones 
-        WHERE fecha >= ?
-        GROUP BY categoria
-    """, (fecha_inicio,))
-    detalles = cursor.fetchall()
-    conexion.close()
-    
-    balance_neto = total_ingresos - total_gastos
-    return total_ingresos, total_gastos, balance_neto, detalles
+    hoy = datetime.now().date()
+    lunes = hoy - timedelta(days=hoy.weekday())
+    fecha_inicio = lunes.strftime('%Y-%m-%d')
+    fecha_fin = (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
+    return _get_summary_for_range(fecha_inicio, fecha_fin)
 
 def get_monthly_summary():
-    inicio_mes = datetime.now().strftime('%Y-%m-01')
-    conexion = sqlite3.connect("finanzas_didi.db")
-    cursor = conexion.cursor()
-    
-    cursor.execute("""
-        SELECT SUM(monto) FROM transacciones 
-        WHERE tipo = 'ingreso' AND fecha >= ?
-    """, (inicio_mes,))
-    res_ing = cursor.fetchone()
-    total_ingresos = res_ing[0] if res_ing and res_ing[0] is not None else 0.0
-    
-    cursor.execute("""
-        SELECT SUM(monto) FROM transacciones 
-        WHERE tipo = 'gasto' AND fecha >= ?
-    """, (inicio_mes,))
-    res_gas = cursor.fetchone()
-    total_gastos = res_gas[0] if res_gas and res_gas[0] is not None else 0.0
-    
-    cursor.execute("""
-        SELECT categoria, SUM(monto) FROM transacciones 
-        WHERE fecha >= ?
-        GROUP BY categoria
-    """, (inicio_mes,))
-    detalles = cursor.fetchall()
-    conexion.close()
-    
-    balance_neto = total_ingresos - total_gastos
-    return total_ingresos, total_gastos, balance_neto, detalles
+    hoy = datetime.now().date()
+    inicio_mes = hoy.replace(day=1)
+    fecha_inicio = inicio_mes.strftime('%Y-%m-%d')
+    fecha_fin = (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
+    return _get_summary_for_range(fecha_inicio, fecha_fin)
 
 init_db()
