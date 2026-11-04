@@ -1,12 +1,9 @@
 import asyncio
 import logging
-from datetime import time
-import re
 import os
+import tempfile
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from PIL import Image
-import pytesseract
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,15 +13,14 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
-from apscheduler.schedulers.background import BackgroundScheduler
 from database import registrar_transaccion, get_daily_summary, get_weekly_summary, get_monthly_summary
+from ocr_procesor import extract_didi_trip_info_async
+from scheduler_reports import setup_report_scheduler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-
-pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
 TOKEN = "8827946740:AAEZnOlJziFLbDJMeBaCiARLrClWf3Cu9sI"
 GLOBAL_CHAT_ID = None
@@ -112,7 +108,7 @@ async def responder_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         metodo = data.replace("pago_", "").capitalize()
         monto = context.user_data.get("monto_pendiente", 0)
         
-        registrar_transaccion("ingreso", f"Didi ({metodo})", monto)
+        await asyncio.to_thread(registrar_transaccion, "ingreso", f"Didi ({metodo})", monto)
         context.user_data.clear()
 
         await query.edit_message_text(
@@ -124,7 +120,7 @@ async def responder_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "bal_diario":
-        total_ingresos, total_gastos, balance_neto, detalles = get_daily_summary()
+        total_ingresos, total_gastos, balance_neto, detalles = await asyncio.to_thread(get_daily_summary)
         
         texto_resumen = (
             "📊 *Balance Financiero:*\n\n"
@@ -148,7 +144,7 @@ async def responder_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "bal_semanal":
-        total_ingresos, total_gastos, balance_neto, detalles = get_weekly_summary()
+        total_ingresos, total_gastos, balance_neto, detalles = await asyncio.to_thread(get_weekly_summary)
         
         texto_resumen = (
             "📅 *Balance Semanal (Lunes a Hoy):*\n\n"
@@ -172,7 +168,7 @@ async def responder_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "bal_mensual":
-        total_ingresos, total_gastos, balance_neto, detalles = get_monthly_summary()
+        total_ingresos, total_gastos, balance_neto, detalles = await asyncio.to_thread(get_monthly_summary)
         
         texto_resumen = (
             "📆 *Balance Mensual (Mes Actual):*\n\n"
@@ -231,7 +227,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             monto = float(texto)
             categoria = context.user_data.get("categoria_actual", "Gasto General")
-            registrar_transaccion("gasto", categoria, monto)
+            await asyncio.to_thread(registrar_transaccion, "gasto", categoria, monto)
             context.user_data.clear()
             await update.message.reply_text(
                 f"✅ ¡Gasto de *{categoria}* por *${monto:,.0f}* registrado exitosamente!",
@@ -249,47 +245,18 @@ async def recibir_imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text("🔍 Leyendo captura de pantalla con OCR...")
 
-    photo_file = await update.message.photo[-1].get_file()
-    image_path = "temp_capture.jpg"
-    await photo_file.download_to_drive(image_path)
-
+    image_path = None
     try:
-        imagen = Image.open(image_path)
-        texto_ocr = await asyncio.to_thread(
-            pytesseract.image_to_string,
-            imagen,
-            lang='spa'
-        )
-        
-        monto_detectado = None
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as image_file:
+            image_path = image_file.name
+        photo_file = await update.message.photo[-1].get_file()
+        await photo_file.download_to_drive(image_path)
+
+        trip_info = await extract_didi_trip_info_async(image_path)
+        monto_detectado = trip_info["net_earnings"]
         duracion_distancia = "No detectada"
-
-        match_duracion = re.search(r'(\d+m\s*\d*s?)', texto_ocr)
-        match_distancia = re.search(r'(\d+[\.,]?\d*\s*km)', texto_ocr, re.IGNORECASE)
-        if match_duracion and match_distancia:
-            duracion_distancia = f"{match_duracion.group(1)} / {match_distancia.group(1)}"
-
-        lineas = texto_ocr.split('\n')
-        for i, linea in enumerate(lineas):
-            if "ganancias" in linea.lower() or "total" in linea.lower() or "tarifa" in linea.lower():
-                bloque_a_revisar = linea + " " + (lineas[i+1] if i+1 < len(lineas) else "")
-                numeros = re.findall(r'\d{1,3}(?:[.,]\d{3})*|\d+', bloque_a_revisar)
-                if numeros:
-                    limpio = numeros[-1].replace('.', '').replace(',', '')
-                    val = float(limpio)
-                    if 3000 <= val <= 500000:
-                        monto_detectado = val
-                        break
-
-        if not monto_detectado:
-            todos_los_numeros = re.findall(r'\d{1,3}(?:[.,]\d{3})*|\d+', texto_ocr)
-            for num in todos_los_numeros:
-                limpio = num.replace('.', '').replace(',', '')
-                if limpio.isdigit():
-                    val = float(limpio)
-                    if 5000 <= val <= 150000:
-                        monto_detectado = val
-                        break
+        if trip_info["duration"] != "N/A" and trip_info["distance"] != "N/A":
+            duracion_distancia = f"{trip_info['duration']} / {trip_info['distance']}"
 
         if monto_detectado:
             context.user_data["monto_pendiente"] = monto_detectado
@@ -327,21 +294,9 @@ async def recibir_imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=status_msg.message_id,
             text="❌ Ocurrió un error procesando la imagen. Intenta escribir el monto manualmente."
         )
-
-def tarea_reporte_nocturno(application):
-    if GLOBAL_CHAT_ID:
-        resumen = get_daily_summary()
-        texto = "🌙 *Reporte Nocturno Automático (9:00 p.m.)*\n\n"
-        if not resumen:
-            texto += "No hubo movimientos registrados hoy."
-        else:
-            for tipo, total in resumen:
-                texto += f"- {tipo.capitalize()}: ${total:,.0f}\n"
-        
-        application.job_queue.run_once(
-            lambda ctx: ctx.bot.send_message(chat_id=GLOBAL_CHAT_ID, text=texto, parse_mode="Markdown"),
-            when=0
-        )
+    finally:
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
 
 # Mini servidor web secundario para mantener vivo el servicio en Render
 class SimpleHandler(BaseHTTPRequestHandler):
@@ -366,9 +321,7 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, recibir_imagen))
 
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(lambda: tarea_reporte_nocturno(app), 'cron', hour=21, minute=0)
-    scheduler.start()
+    setup_report_scheduler(app, lambda: GLOBAL_CHAT_ID)
 
     print("🤖 Bot activo mediante Polling seguro y con servidor web auxiliar...")
     
